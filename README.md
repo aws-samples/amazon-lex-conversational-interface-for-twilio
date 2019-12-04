@@ -180,7 +180,8 @@ Container Registry (ECR).
 The code for the service is available at the GitHub repository below.
 Clone the repository on your local machine.
 
-git clone https://github.com/aws-samples/amazon-lex-conversational-interface-for-twilio.git
+git clone https://github.com/aws-samplesamazon-lex-conversational-interface-for-twilio.git
+
 cd lex-twiliovoice
 
 Next, we update the URL for the Streams element inside
