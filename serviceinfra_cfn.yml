@@ -1,0 +1,192 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: lex/twilio voice integration service
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: lex-twiliovoice-stage
+    Description: Environment name. Same name from the previous deployment to refer to the outputs
+  ServiceName:
+    Type: String
+    Default: lexbot
+    Description: Name of the service
+  ImageUrl:
+    Type: String
+    Default: "lex-twiliovoice-image"
+    Description: The url of a docker image that contains the service (example;xxxxxxx.dkr.ecr.us-west-2.amazonaws.com/lex-twiliovoice:latest)
+  ContainerPort:
+    Type: Number
+    Default: 8080
+    Description: Port number where the service is running
+  ContainerCpu:
+    Type: Number
+    Default: 1024
+    Description: How much CPU to give the container. 1024 is 1 CPU
+  ContainerMemory:
+    Type: Number
+    Default: 2048
+    Description: How much memory in MB to give the container
+  DesiredCount:
+    Type: Number
+    Default: 1
+    Description: How many copies of the service task to run. For this demo, we will use 1
+  TwilioAuthToken:
+    Type: String
+    Default: "TwilioAuthToken"
+    Description: Auth token from the twilio console
+  IAMAccessKeyId:
+    Type: String
+    Default: "IAM User AccessKeyId Here"
+    Description: IAM User AccessKeyId with the following permissions, AmazonLexReadOnly & AmazonLexRunBotsOnly
+  IAMSecretAccessKey:
+    Type: String
+    Default: "IAM User SecretAccessKey Here"
+    Description: IAM User SecretAccessKey with the following permissions, AmazonLexReadOnly & AmazonLexRunBotsOnly
+  LexBotName:
+    Type: String
+    Default: "BookTrip"
+    Description: Enter your Lex Bot name 
+  LexBotAlias:
+    Type: String
+    Default: "beta"
+    Description: Enter your Lex Bot Alias 
+    
+
+Resources:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Join ['-', [!Ref 'EnvironmentName', 'service', !Ref 'ServiceName']]
+  #Task definition and container definitions
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref 'ServiceName'
+      Cpu: !Ref 'ContainerCpu'
+      Memory: !Ref 'ContainerMemory'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn:
+        Fn::ImportValue:
+          !Join [':', [!Ref 'EnvironmentName', 'ECSTaskExecutionRole']]
+      ContainerDefinitions:
+        - Name: !Ref 'ServiceName'
+          Cpu: !Ref 'ContainerCpu'
+          Memory: !Ref 'ContainerMemory'
+          Image: !Ref 'ImageUrl'
+          Environment:
+            - Name: AWS_REGION
+              Value: !Ref 'AWS::Region'
+            - Name: ACCESS_KEY_ID
+              Value: !Ref 'IAMAccessKeyId'
+            - Name: SECRET_ACCESS_KEY
+              Value: !Ref 'IAMSecretAccessKey'  
+            - Name: LEX_BOT_NAME
+              Value: !Ref 'LexBotName' 
+            - Name: LEX_BOT_ALIAS
+              Value: !Ref 'LexBotAlias' 
+            - Name: TWILIO_AUTH_TOKEN
+              Value: !Ref 'TwilioAuthToken'
+            - Name: CONTAINER_PORT
+              Value: !Ref 'ContainerPort' 
+            - Name: URL
+              Value: 
+               ! Fn::ImportValue:
+                  !Join [':', [!Ref 'EnvironmentName', 'ExternalUrl']]
+          PortMappings:
+            - ContainerPort: !Ref 'ContainerPort'
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Join ['-', [!Ref 'EnvironmentName', 'service', !Ref 'ServiceName']]
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Ref 'ServiceName'
+
+  #ECS Service
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - HTTPRule
+    Properties:
+      ServiceName: !Ref 'ServiceName'
+      Cluster:
+        Fn::ImportValue:
+          !Join [':', [!Ref 'EnvironmentName', 'ClusterName']]
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 75
+      DesiredCount: !Ref 'DesiredCount'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - Fn::ImportValue:
+                !Join [':', [!Ref 'EnvironmentName', 'FargateContainerSecurityGroup']]
+          Subnets:
+            - Fn::ImportValue:
+                !Join [':', [!Ref 'EnvironmentName', 'PublicSubnetOne']]
+            - Fn::ImportValue:
+                !Join [':', [!Ref 'EnvironmentName', 'PublicSubnetTwo']]
+      TaskDefinition: !Ref 'TaskDefinition'
+      LoadBalancers:
+        - ContainerName: !Ref 'ServiceName'
+          ContainerPort: !Ref 'ContainerPort'
+          TargetGroupArn: !Ref 'TargetGroup'
+
+  #Target group
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 6
+      HealthCheckPath: /ping
+      Matcher:
+        HttpCode: 200
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      TargetType: ip
+      Name: !Join ['-', [!Ref 'EnvironmentName', !Ref 'ServiceName']]
+      Port: !Ref 'ContainerPort'
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      TargetGroupAttributes:
+        - Key: stickiness.enabled
+          Value: true
+        - Key: deregistration_delay.timeout_seconds
+          Value: 30
+      VpcId:
+        Fn::ImportValue:
+          !Join [':', [!Ref 'EnvironmentName', 'VPCId']]
+
+  # Create rules to forward HTTP Traffic to the target group
+  HTTPRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - TargetGroupArn: !Ref 'TargetGroup'
+          Type: 'forward'
+      Conditions:
+        - Field: path-pattern
+          Values: ['*']
+      ListenerArn:
+        Fn::ImportValue:
+          !Join [':', [!Ref 'EnvironmentName', 'PublicListenerHTTP']]
+      Priority: 1
+  HTTPSRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - TargetGroupArn: !Ref 'TargetGroup'
+          Type: 'forward'
+      Conditions:
+        - Field: path-pattern
+          Values: ['*']
+      ListenerArn:
+        Fn::ImportValue:
+          !Join [':', [!Ref 'EnvironmentName', 'PublicListenerHTTPS']]
+      Priority: 1
+
+
+ 

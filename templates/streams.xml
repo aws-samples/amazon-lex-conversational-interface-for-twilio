@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say>You will be interacting with Lex bot in 3, 2, 1. Go.</Say>
+  <Start>
+    <Stream url="wss://<url>/"></Stream>
+  </Start>
+  <Pause length="40"/>
+</Response>
