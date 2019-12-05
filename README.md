@@ -182,7 +182,7 @@ Clone the repository on your local machine.
 
 git clone https://github.com/aws-samples/amazon-lex-conversational-interface-for-twilio.git
 
-cd lex-twiliovoice
+cd amazon-lex-conversational-interface-for-twilio
 
 Next, we update the URL for the Streams element inside
 templates/streams.xml to match the DNS name for your service that you
